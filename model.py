@@ -15,13 +15,10 @@ from collections import deque
 class NeuralNetwork(nn.Module):
     def __init__(self, layers: list):
         super().__init__()
-        self.flatten = nn.Flatten()
-        self.linear_relu_stack = nn.Sequential(*layers)
+        self.sequantial_stack = nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.flatten(x)
-        logits = self.linear_relu_stack(x)
-        return logits
+        return self.sequantial_stack(x)
 
     def save(self, file_name='model.pth'):
         model_folder_path = './model'
@@ -38,20 +35,13 @@ class NeuralNetwork(nn.Module):
 
 
 class NNTrainer:
-    def __init__(self, model: NeuralNetwork, optimizer=optim.SGD, loss_fn=nn.CrossEntropyLoss, learning_rate=1e-3, device=None):
+    def __init__(self, model: NeuralNetwork, optimizer=optim.Adam, loss_fn=nn.MSELoss, learning_rate=1e-3):
         self.model = model
-        self.device = device
         self.learning_rate = learning_rate
-        if self.device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-            print(f'Using {self.device} device')
-        self.model.to(self.device)
         self.optimizer = optimizer(self.model.parameters(), lr=self.learning_rate)
         self.loss_fn = loss_fn()
 
     def train_step(self, X: torch.Tensor, y: torch.Tensor):
-        X, y = X.to(self.device), y.to(self.device)
-
         # Get prediction and calculate loss
         pred = self.model(X)
         loss = self.loss_fn(pred, y)
@@ -62,7 +52,8 @@ class NNTrainer:
         self.optimizer.zero_grad()
         return loss.item()
 
-    # def train(self, dataloader):
-    #     size = len(dataloader.dataset)
-    #     for batch, (x, y) in enumerate(dataloader):
-    #         print(batch, x.shape, y.shape)
+    def train(self, training_dataloader):
+        pass
+
+    def test(self, testing_dataloader):
+        pass

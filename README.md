@@ -1,0 +1,103 @@
+# Network Flow Classification - Cyber & ML Project 1
+By Kamron Cole
+
+### File Overview
+- `./data`: datasets used to train models
+ - `Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv`: CSV of flows and features
+- `./model`: This is where trained pytorch models are saved
+ - `autoencoder_272.pth`: An PyTorch autoencoder model trained until a low enough loss was achieved (272 epochs)
+  - Activation Function: ELU
+  - Loss Function: Mean Squared Loss
+  - Optimization Function: Adam - 0.01 learning rate
+  - Encoder with layers with the following amount of nodes, in order
+   - 77 - 64 - 32 - 24 - 16 - 8
+  - Decoder with the same layers in reverse order.
+   - 8 - 16 - 24 - 32 - 64 - 77
+ - `classifier_254.pth`: A PyTorch model trained until a low enough loss was achieved (254 epochs)
+  - Activation Function: ReLU, Sigmoid (Output layer)
+  - Loss Function: Binary Cross-Entropy Loss
+  - Optimization Function: Adam - 0.01 learning rate
+  - A Sequential model with layers with the following amount of nodes, in order
+   - 8 - 6 - 5 - 4 - 2 - 1
+- `.gitignore`: tells git to ignore specific directories and files
+- `autoencoder.py`: code for training/testing the autoencoder and classifier models
+- `confusion_matrix.png`: Graph showing the results of testing the autoencoder and classifier model with a matrix of actual vs predicted values
+- `feature_importance.png`: Shows an estimated importance of each feature as determined by the autoencoder model. Calculated using preterbation (setting each feature to 0 getting average loss difference between it and the base loss)
+- `feature_idx_to_importance_and_label.json`: JSON file saved mapping CSV label to feature importance (difference between base mean loss and the mean loss with a specific feature set to 0 across the dataset)
+- `model.py`: Unused file meant to provide abstracted model/training for PyTorch models to classes
+- `randomforest.py`: Use scikit-learn package to create, train, and test a Random Forest model on the dataset
+- `README.md`: This file
+- `requirements.txt`: list of python packages required for files in this folder to work
+
+### Resources Used
+1. https://pytorch.org/tutorials/beginner/basics/quickstart_tutorial.html
+ - Helped a lot with using PyTorch. I've tried working with TensorFlow before and I had a lot of issues, plus I wanted to work locally on my Macbook, wich tensorflow scarcely supports.
+ - This also made me realize some differences though in distinct differences with AI/ML models and their structures. PyTorch does not support RNN/RandomForest like models/algorithms on its own.
+2. https://b-nova.com/en/home/content/anomaly-detection-with-random-forest-and-pytorch/
+ - Helped a lot with implementing a Random Forest and AutoEncoding models while also helping me understand the concept of the models themselves
+3. https://mycourses.rit.edu/d2l/le/content/1105209/viewContent/10136765/View
+ - Paper provided for the assignment containing features and algorithm training/testing statistics
+
+# How To Run
+I highly recommend setting up a virtual environment for this.
+I am using Python 3.12.5. After installing all the packages in the requirements.txt each file should work as is. 
+
+`randomforest.py` should run pretty quickly on it's own
+`autoencoder.py` will have training and metric collect code commented out so that it loads the saved models and tests the data.
+
+I use `uv`, so to create a virtual env i use `uv venv --python $(which python3.12)` and then I can install packages using `uv pip install -r requirements.txt`. The commands for `pip` should be similar but I don't know them for sure.
+
+If you dont use `uv` I highly recommend it as a replacement for `pip`. Rust based python package manager. MUCH faster than default `pip`
+
+# The Outlook
+The outlook for this assignment was to create a model that had similar performances to the ones tested in the provided paper.
+We were to choose a day of network data to train our model on and then use their 4 features as input for our model and get similar performance to their. The paper highly recommended a model using the Random Forest (RF) model as it was easily the fastest to train with an accuracy tied for first. 
+
+I aimed to implement the Random Forest model, but also to investigate if the 4 features the paper chose were indeed the most important.
+I chose to work on Friday's DDoS flow data as it and DoS intuitively seem to be the easiest to detect from flow data.
+All was run/trained locally on my Macbook Pro M3 Max.
+
+# The Data
+First, the data. The paper says the prosessing of the raw PCAP data, converted it into flows, each having 80 features. I Used the `Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv` from the `TrafficLabeling` folder (Not the `MachineLearningCVE`). This provided 250,000 lines of flow data to train on, which I generally give a random 60/40 split; 60% for training, 40% for testing.
+
+# The Random Forest
+implemented in `randomforest.py`
+
+Using the 4 features said to be the most important in the paper and using its recommendation to use the RF (Random Forest) algorithm, it uses `scikit-learn` package to create, train, and test the Random Forest model.
+
+The paper reports Random Forest took 74.39 seconds to train and test and resulted in a 0.98 precision, 0.97 recall, and a 0.97 F1 score.
+
+My model is implemented much like theirs using scikit-learn but they do not specify number of n_estimators or random_state. Using 120 n_estimates and ~42% of that (50) as random_state I was able to achieve 0.99 precision, 0.99 recall, and 0.99 F1 score, training on 60% of the data and testing on the remaining 40%. For me, training and testing, takes on average 9-10 seconds.
+
+The improvements in my model are likely due to a few factors. It is likely I may be using more data to train my model, it is also likely that I have more n_estimators and random_state resulting in better performance. If I am using more data to train, my random forest could potentially be overfit to the data.
+
+The differences in execution time are likely just differences in hardware. I am using a M3 Max Macbook Pro.
+
+# The Autoencoder
+implemented in `autoencoder.py`
+
+The paper didn't go into much detail with the method used to select the 4 best features for each attack type, so I wanted to find this on my own. The type of model generally used for this is called an AutoEncoder. Each forward step works in two passes, one to an encoder, and another into a decoder which is a mirror of the encoder's structure. The encoder usually takes some number of inputs, and gradually decreases this in subsequent layers to a bottleneck, which is then passed to the decoder. When training this model, then, the loss repressents the ability of the model to reconstruct the initial inputs after being compressed to the bottleneck, meaning the encoder is trained to make it's bottleneck layer some combined representation of the inputs, and is, in a sense, a form of feature extraction. From this, we can then determine the importance of each feature by checking how much it has on the loss after training.
+
+With this method, my model seems to have determined the following to be the most important, in order from most to least important:
+1. Flow Bytes/s
+2. Idle Max
+3. Idle Mean
+4. Flow IAT Max
+5. Fwd IAT Max
+6. Idle Min
+7. Flow Duration
+8. Fwd IAT Total
+
+The only feature this shares with the 4 from the paper is Flow Duration, and even then it's not in the top 4. This could potentially be due to my model's bottle neck layer being 8 nodes instead of 4, but even then I would expect Flow IAT Std, Bachward Packet Length Std, or Average Package Size to be at least in the top 8 if they were the most influentia features.
+
+Now that I have a trained Autoencoder model, I can extract the encoding layer to compress the 77 inputs into 8. I can then train a separate model meant to classify flows as DDoS or BENIGN based on the 8 extracted features from the autoencoder.
+
+These models I trained until some arbitrarily adequate low loss was achieved. For the autoencoder this was less than 0.000014, and for the classifier, less than 0.0045.
+
+For the classifier, I chose to use a reverse pyramid structure, each layer using ReLU as its activation function, until the last layer of a single node which uses the Signmoid Function for activation. This allows me to treat the output as a probability of an input flow being DDoS or BENIGN.
+
+Using the autoencoder model and classifier model in tandem, and rounding the output of the classifier model results in an even better results than the Random Forest model, result in 1.00 precision, recall, and f1 score. This, of course, is rounded but still shows more accururacy with almost 2 times less false positives and false negatives than the Random Forest model.
+
+The main downside of this is, of course, time it took to train the autoencoder and the classifier as both required over 250 epochs (272 and 254 respectively) to reach a desired loss value. This itself took about 10 minutes and, using the relative time difference for running the random forest model, would have taken the researchers over an hour. However, less false positives and negatives are highly advantagous when implementing a model like this. It is also possible to adjust the threshold which will adjust the ratio of false negatives to false positives to potentially get a more desirable result.
+
+Another use for an Autoencoder here could be to train the model solely on BENIGN flow data. The purpose here is to "overfit" the model to benign data so that when passed some anomaly flow (like a DDoS flow), the loss calculation should be noticably different. This would likely require more BENIGN data though, which I could get from the other day's CSVs. I attempted such approach but later replaced it for the current one using half of the autoencoder model and a separate classifier model.
