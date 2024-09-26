@@ -1,7 +1,8 @@
-'''
+"""
 Using reference code found here:
 https://b-nova.com/en/home/content/anomaly-detection-with-random-forest-and-pytorch/
-'''
+"""
+
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
@@ -11,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from time import perf_counter
 
 import csv
+
 
 class NetFlowDataSet(Dataset):
     def __init__(self, csv_file):
@@ -22,13 +24,13 @@ class NetFlowDataSet(Dataset):
 
     def __getitem__(self, idx):
         row = self.data[idx]
-        x1 = row[0] # Flow Duration
-        x2 = row[1] # Bwd Packet Length Std
-        x3 = row[2] # Flow IAT Std
-        x4 = row[3] # Avg Packet Size
+        x1 = row[0]  # Flow Duration
+        x2 = row[1]  # Bwd Packet Length Std
+        x3 = row[2]  # Flow IAT Std
+        x4 = row[3]  # Avg Packet Size
 
         xs = [x1, x2, x3, x4]
-        values = np.array(xs, dtype=np.float32) # 4 features
+        values = np.array(xs, dtype=np.float32)  # 4 features
         is_ddos = row[-1] == 'DDoS'
         X = values
         y = int(is_ddos)
@@ -57,11 +59,11 @@ print(f'Training time: {(end - start)}s')
 y_pred = rfc.predict(X_test + X_train)
 
 # Printing the confusion matrix and classification report
-print(confusion_matrix(y_test + y_train, y_pred))
+cm = confusion_matrix(y_test + y_train, y_pred)
+print(cm)
 print(classification_report(y_test + y_train, y_pred))
 
 # Plotting the confusion matrix
-cm = confusion_matrix(y_test + y_train, y_pred)
 sns.heatmap(cm, annot=True, fmt='g', cmap='Blues')
 plt.xlabel('Predicted')
 plt.ylabel('Actual')

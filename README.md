@@ -1,7 +1,7 @@
 # Network Flow Classification - Cyber & ML Project 1
 By Kamron Cole
 
-### File Overview
+### Repo Overview
 - `./data`: datasets used to train models
  - `Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv`: CSV of flows and features
 - `./model`: This is where trained pytorch models are saved
@@ -22,7 +22,6 @@ By Kamron Cole
 - `.gitignore`: tells git to ignore specific directories and files
 - `autoencoder.py`: code for training/testing the autoencoder and classifier models
 - `confusion_matrix.png`: Graph showing the results of testing the autoencoder and classifier model with a matrix of actual vs predicted values
-- `feature_importance.png`: Shows an estimated importance of each feature as determined by the autoencoder model. Calculated using preterbation (setting each feature to 0 getting average loss difference between it and the base loss)
 - `feature_idx_to_importance_and_label.json`: JSON file saved mapping CSV label to feature importance (difference between base mean loss and the mean loss with a specific feature set to 0 across the dataset)
 - `model.py`: Unused file meant to provide abstracted model/training for PyTorch models to classes
 - `randomforest.py`: Use scikit-learn package to create, train, and test a Random Forest model on the dataset
@@ -39,15 +38,20 @@ By Kamron Cole
  - Paper provided for the assignment containing features and algorithm training/testing statistics
 
 # How To Run
+### Installing Dependencies
 I highly recommend setting up a virtual environment for this.
 I am using Python 3.12.5. After installing all the packages in the requirements.txt each file should work as is. 
-
-`randomforest.py` should run pretty quickly on it's own
-`autoencoder.py` will have training and metric collect code commented out so that it loads the saved models and tests the data.
 
 I use `uv`, so to create a virtual env i use `uv venv --python $(which python3.12)` and then I can install packages using `uv pip install -r requirements.txt`. The commands for `pip` should be similar but I don't know them for sure.
 
 If you dont use `uv` I highly recommend it as a replacement for `pip`. Rust based python package manager. MUCH faster than default `pip`
+
+### Testing Models
+`randomforest.py` should run pretty quickly on it's own. It will train the Random Forest on 60% of the data, test on the full dataset and plot a confusion matrix.
+`autoencoder.py` will load my pre-trained models and then test its accuracy on the full dataset and plot a confusion matrix.
+
+To run the files, be in the root directory of the repo and pass the respective file names to the `python` or `python3` command, e.g.
+`python3 autoencoder.py`
 
 # The Outlook
 The outlook for this assignment was to create a model that had similar performances to the ones tested in the provided paper.
@@ -59,6 +63,8 @@ All was run/trained locally on my Macbook Pro M3 Max.
 
 # The Data
 First, the data. The paper says the prosessing of the raw PCAP data, converted it into flows, each having 80 features. I Used the `Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv` from the `TrafficLabeling` folder (Not the `MachineLearningCVE`). This provided 250,000 lines of flow data to train on, which I generally give a random 60/40 split; 60% for training, 40% for testing.
+
+When loading the data, I explicitly exclude the Flow ID, Source IP, Source Port, Destination IP, Destination Port, Protocol, and Timestamp columns. I do this to prevent an overfitting of my model to the training data, since a network can have a wide variety of incoming/outgoing IPs, port numbers, timestamps, and the like, that aren't inherently important to detecting if a DDoS is occuring.
 
 # The Random Forest
 implemented in `randomforest.py`
@@ -76,9 +82,9 @@ The differences in execution time are likely just differences in hardware. I am 
 # The Autoencoder
 implemented in `autoencoder.py`
 
-The paper didn't go into much detail with the method used to select the 4 best features for each attack type, so I wanted to find this on my own. The type of model generally used for this is called an AutoEncoder. Each forward step works in two passes, one to an encoder, and another into a decoder which is a mirror of the encoder's structure. The encoder usually takes some number of inputs, and gradually decreases this in subsequent layers to a bottleneck, which is then passed to the decoder. When training this model, then, the loss repressents the ability of the model to reconstruct the initial inputs after being compressed to the bottleneck, meaning the encoder is trained to make it's bottleneck layer some combined representation of the inputs, and is, in a sense, a form of feature extraction. From this, we can then determine the importance of each feature by checking how much it has on the loss after training.
+The paper didn't go into much detail with the method used to select the 4 best features for each attack type, so I wanted to find this on my own. The type of model generally used for this is called an AutoEncoder. Each forward step works in two passes, one to an encoder, and another to a decoder which is a mirror of the encoder's structure. The encoder usually takes some number of inputs, and gradually decreases this in subsequent layers to a bottleneck, which is then passed to the decoder. When training this model, then, the loss repressents the ability of the model to reconstruct the initial inputs after being compressed to the bottleneck, meaning the encoder is trained to make it's bottleneck layer some combined representation of the inputs, and is, in a sense, a form of feature extraction. From this, we can then determine the importance of each feature by checking how much impact it has on the loss after training.
 
-With this method, my model seems to have determined the following to be the most important, in order from most to least important:
+With this method, my model seems to have determined the following 8 features to be the most important, in order from most to least important:
 1. Flow Bytes/s
 2. Idle Max
 3. Idle Mean
@@ -88,16 +94,18 @@ With this method, my model seems to have determined the following to be the most
 7. Flow Duration
 8. Fwd IAT Total
 
-The only feature this shares with the 4 from the paper is Flow Duration, and even then it's not in the top 4. This could potentially be due to my model's bottle neck layer being 8 nodes instead of 4, but even then I would expect Flow IAT Std, Bachward Packet Length Std, or Average Package Size to be at least in the top 8 if they were the most influentia features.
+The only feature this shares with the 4 from the paper is Flow Duration, and even then it's not in the top 4. This could potentially be due to my model's bottle neck layer being 8 nodes instead of 4, but even then I would expect Flow IAT Std, Backward Packet Length Std, or Average Package Size to be at least in the top 8 if they were the most influential features.
+
+For perspective, the paper's top 4 features are listed 7th (Flow Duration), 13th (Flow IAT Std), 24th (Backward Packet Length Std), and 45th (Average Packet Size) when ordered by importance.
 
 Now that I have a trained Autoencoder model, I can extract the encoding layer to compress the 77 inputs into 8. I can then train a separate model meant to classify flows as DDoS or BENIGN based on the 8 extracted features from the autoencoder.
 
-These models I trained until some arbitrarily adequate low loss was achieved. For the autoencoder this was less than 0.000014, and for the classifier, less than 0.0045.
+These models I trained until some arbitrarily low loss was achieved. For the autoencoder this was less than 0.000014, and for the classifier, less than 0.0045.
 
-For the classifier, I chose to use a reverse pyramid structure, each layer using ReLU as its activation function, until the last layer of a single node which uses the Signmoid Function for activation. This allows me to treat the output as a probability of an input flow being DDoS or BENIGN.
+For the classifier, I chose to use a reverse pyramid structure, each layer using ReLU as its activation function, until the last layer of a single node which uses the Signmoid Activation Function. This allows me to treat the output as a probability of an input flow being DDoS or BENIGN.
 
 Using the autoencoder model and classifier model in tandem, and rounding the output of the classifier model results in an even better results than the Random Forest model, result in 1.00 precision, recall, and f1 score. This, of course, is rounded but still shows more accururacy with almost 2 times less false positives and false negatives than the Random Forest model.
 
-The main downside of this is, of course, time it took to train the autoencoder and the classifier as both required over 250 epochs (272 and 254 respectively) to reach a desired loss value. This itself took about 10 minutes and, using the relative time difference for running the random forest model, would have taken the researchers over an hour. However, less false positives and negatives are highly advantagous when implementing a model like this. It is also possible to adjust the threshold which will adjust the ratio of false negatives to false positives to potentially get a more desirable result.
+The main downside of this is, of course, the time it took to train the autoencoder and the classifier as both required over 250 epochs (272 and 254 respectively) to reach a desired loss value. This itself took about 10 minutes and, using the relative time difference for running the random forest model, would have taken the researchers over an hour. However, less false positives and negatives are highly advantagous when implementing a model like this. It is also possible to adjust the threshold which will adjust the ratio of false negatives to false positives to potentially get a more desirable result.
 
 Another use for an Autoencoder here could be to train the model solely on BENIGN flow data. The purpose here is to "overfit" the model to benign data so that when passed some anomaly flow (like a DDoS flow), the loss calculation should be noticably different. This would likely require more BENIGN data though, which I could get from the other day's CSVs. I attempted such approach but later replaced it for the current one using half of the autoencoder model and a separate classifier model.
