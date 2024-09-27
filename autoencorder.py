@@ -3,27 +3,32 @@ Using reference code found here:
 https://b-nova.com/en/home/content/anomaly-detection-with-random-forest-and-pytorch/
 """
 
+import csv
+import json
+import os
+import warnings
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-import json
-import os
-import csv
 
+from itertools import batched
 from pprint import pprint
+from time import perf_counter
+
 from torch.nn.functional import mse_loss
 from torch.utils.data import Dataset, DataLoader, random_split
+
 from sklearn.preprocessing import Normalizer, MinMaxScaler
-import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
-import seaborn as sns
 
-import warnings
 
+# Prevent warnings from being printed
 warnings.filterwarnings('ignore')
-
-LABELS = ['BENIGN', 'DDoS']
 
 
 class NetFlowDataSet(Dataset):
@@ -34,9 +39,16 @@ class NetFlowDataSet(Dataset):
     Normalizes and scales the data
 
     Excludes data like IP addresses, ports, and timestamps to help with generalization
+
+    To build in batching and shuffling rather than using a Dataloader
+    uncomment lines:
+    67-75, 79, 82-87
+    and comment lines:
+    64-65, 78, 396
     """
 
-    def __init__(self, csv_file):
+    def __init__(self, csv_file, device):
+        self.device = device
         with open(csv_file, 'r') as f:
             temp = list(csv.reader(f))
             self.columns = [col_tag.strip() for col_tag in temp[0][7:-1]]
@@ -49,19 +61,40 @@ class NetFlowDataSet(Dataset):
             scaler = MinMaxScaler()
             self.Xs = scaler.fit_transform(self.Xs)
 
+            self.Xs = torch.tensor(self.Xs, dtype=torch.float32, device=device)
+            self.ys = torch.tensor(self.ys, dtype=torch.float32, device=device)
+
+            # self.Xss = list(batched(self.Xs, 2560))
+            # self.yss = list(batched(self.ys, 2560))
+            # self.Xs = torch.tensor(self.Xss[:-1], dtype=torch.float32, device=device)
+            # self.ys = torch.tensor(self.yss[:-1], dtype=torch.float32, device=device)
+            # self.Xss = torch.tensor(self.Xss[:][-1], dtype=torch.float32, device=device)
+            # self.yss = torch.tensor(self.yss[:][-1], dtype=torch.float32, device=device)
+
+            # self.default_idxs = set(range(len(self)))
+            # self.idxs = set(self.default_idxs)
+
     def __len__(self):
         return len(self.Xs)
+        # return len(self.Xs) + 1
 
     def __getitem__(self, idx):
-        return torch.tensor(self.Xs[idx], dtype=torch.float32), torch.tensor(self.ys[idx], dtype=torch.float32)
+        # if len(self.idxs) == 0:
+        #     self.idxs = set(self.default_idxs)
+        # idx = np.random.choice(list(self.idxs))
+        # self.idxs.remove(idx)
+        # if idx == len(self.Xs):
+        #     return self.Xss, self.yss
+        return self.Xs[idx], self.ys[idx]
 
 
 # Define the autoencoder architecture
 class Autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(nn.Linear(77, 64), nn.ELU(True), nn.Linear(64, 32), nn.ELU(True), nn.Linear(32, 24), nn.ELU(True), nn.Linear(24, 16), nn.ELU(True), nn.Linear(16, 8), nn.ELU(True))
         self.decoder = nn.Sequential(nn.Linear(8, 16), nn.ELU(True), nn.Linear(16, 24), nn.ELU(True), nn.Linear(24, 32), nn.ELU(True), nn.Linear(32, 64), nn.ELU(True), nn.Linear(64, 77), nn.ELU(True))
+        self.device = device
 
     def forward(self, x):
         x = self.encoder(x)
@@ -72,7 +105,6 @@ class Autoencoder(nn.Module):
         model_folder_path = './model'
         if not os.path.exists(model_folder_path):
             os.makedirs(model_folder_path)
-
         file_name = os.path.join(model_folder_path, file_name)
         torch.save(self.state_dict(), file_name)
 
@@ -84,20 +116,24 @@ class Autoencoder(nn.Module):
 
 def train_autoencoder(autoencoder: Autoencoder, train_dataset: DataLoader, desired_loss=0.000014):
     autoencoder.train()
+    autoencoder.to(autoencoder.device)
 
     print('\nTraining the autoencoder...')
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(autoencoder.parameters(), lr=0.01)
-    loss = torch.tensor(1.0)
+    criterion = nn.MSELoss().to(autoencoder.device)
+    optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
+    loss = torch.tensor(1.0, device=autoencoder.device)
     epoch = 0
+    desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
     while loss.item() > desired_loss:
-        for _, (X, _) in enumerate(train_dataset):
+        start = perf_counter()
+        for X, _ in train_dataset:
             optimizer.zero_grad()
             preds: torch.Tensor = autoencoder(X)
             loss: torch.Tensor = criterion(preds, X)
             loss.backward()
             optimizer.step()
-        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}')
+        end = perf_counter()
+        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
         epoch += 1
     autoencoder.save(f'autoencoder_{epoch}.pth')
 
@@ -223,7 +259,7 @@ def find_important_features(autoencoder: Autoencoder, full_dataset: NetFlowDataS
     baseline_loss = torch.cat(baseline_losses).mean().item()  # Baseline reconstruction loss
 
     num_features = len(full_dataset.columns)
-    feature_importance: dict[int, tuple[str, int]] = dict()  # Store importance scores for each feature
+    feature_importance = dict()  # Store importance scores for each feature
 
     for feature_idx in range(num_features):  # Loop over each feature
         print(f'Calculating importance of feature {full_dataset.columns[feature_idx]} ({feature_idx + 1}/{len(full_dataset.columns)})...')
@@ -246,7 +282,6 @@ def find_important_features(autoencoder: Autoencoder, full_dataset: NetFlowDataS
     plt.ylabel('Importance')
     plt.title('Feature Importance')
     plt.show()
-    plt.savefig('feature_importance.png')
 
     # Print feature importance dict in descending order of importance
     top_features = {key: val for key, val in sorted(feature_importance.items(), key=lambda x: x[1][1], reverse=True)}
@@ -259,9 +294,11 @@ def find_important_features(autoencoder: Autoencoder, full_dataset: NetFlowDataS
 
 
 class Classifier(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(Classifier, self).__init__()
         self.layers = nn.Sequential(nn.Linear(8, 6), nn.ReLU(), nn.Linear(6, 5), nn.ReLU(), nn.Linear(5, 4), nn.ReLU(), nn.Linear(4, 2), nn.ReLU(), nn.Linear(2, 1), nn.Sigmoid())
+        self.to(device)
+        self.device = device
 
     def forward(self, x):
         return self.layers(x)
@@ -270,7 +307,6 @@ class Classifier(nn.Module):
         model_folder_path = './model'
         if not os.path.exists(model_folder_path):
             os.makedirs(model_folder_path)
-
         file_name = os.path.join(model_folder_path, file_name)
         torch.save(self.state_dict(), file_name)
 
@@ -283,12 +319,17 @@ class Classifier(nn.Module):
 def train_classifier(autoencoder: Autoencoder, classifier: Classifier, train_dataloader: DataLoader, desired_loss=0.0045):
     classifier.train()
 
+    # Warm up the device
+    for _ in range(100):
+        torch.matmul(torch.rand(500, 500).to(autoencoder.device), torch.rand(500, 500).to(autoencoder.device))
+
     print('\nTraining the classifier...')
     criterion = nn.BCELoss()
     optimizer = optim.Adam(classifier.parameters(), lr=0.01)
     loss = torch.tensor(1.0)
     epoch = 0
     while loss.item() > desired_loss:
+        start = perf_counter()
         for _, (X, y) in enumerate(train_dataloader):
             optimizer.zero_grad()
             features = autoencoder.encoder(X)
@@ -296,7 +337,8 @@ def train_classifier(autoencoder: Autoencoder, classifier: Classifier, train_dat
             loss: torch.Tensor = criterion(preds, y)
             loss.backward()
             optimizer.step()
-        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}')
+        end = perf_counter()
+        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
         epoch += 1
     classifier.save(f'classifier_{epoch}.pth')
 
@@ -336,19 +378,28 @@ def test_classifier(autoencoder: Autoencoder, classifier: Classifier, dataset: D
 
 
 def main():
+    # Get device
+    # CPU is faster for me than MPS, so I'm using CPU, uncomment the line below to use GPU and comment the line below it
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+    device = torch.device('cpu')
+    print(f'Using Device: {device}')
+
+
     # Load the data
+    print('Loading data...', end='')
     csv_file_path = 'data/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv'
-    full_dataset = NetFlowDataSet(csv_file_path)
+    full_dataset = NetFlowDataSet(csv_file_path, device=device)
     train_dataset, test_dataset = random_split(full_dataset, [0.6, 0.4])
 
     batch_size = 2560
-    shuffle = True
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
+    shuffle = False
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
+    print('done.')
 
     # Initialize the models
-    autoencoder = Autoencoder()
-    classifier = Classifier()
+    autoencoder = Autoencoder(device)
+    classifier = Classifier(device)
 
     # Train the autoencoder
     # train_autoencoder(autoencoder, train_dataloader)

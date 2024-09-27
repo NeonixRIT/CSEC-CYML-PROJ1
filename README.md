@@ -23,6 +23,7 @@ By Kamron Cole
 - `autoencoder.py`: code for training/testing the autoencoder and classifier models
 - `confusion_matrix.png`: Graph showing the results of testing the autoencoder and classifier model with a matrix of actual vs predicted values
 - `feature_idx_to_importance_and_label.json`: JSON file saved mapping CSV label to feature importance (difference between base mean loss and the mean loss with a specific feature set to 0 across the dataset)
+- `mlxautoencoder.py`: Testing the performance of using Apple's MLX library instead of PyTorch. This file was for testing and will not work unless the `mlx` Python package is installed and you are using Apple Hardware.
 - `model.py`: Unused file meant to provide abstracted model/training for PyTorch models to classes
 - `randomforest.py`: Use scikit-learn package to create, train, and test a Random Forest model on the dataset
 - `README.md`: This file
@@ -40,7 +41,8 @@ By Kamron Cole
 # How To Run
 ### Installing Dependencies
 I highly recommend setting up a virtual environment for this.
-I am using Python 3.12.5. After installing all the packages in the requirements.txt each file should work as is. 
+I have confirmed that this code works with `Python 3.12.5` and `Python 3.11.9`. Lower python versions have not been tested.
+After installing all the packages in the requirements.txt each file should work as is. 
 
 I use `uv`, so to create a virtual env i use `uv venv --python $(which python3.12)` and then I can install packages using `uv pip install -r requirements.txt`. The commands for `pip` should be similar but I don't know them for sure.
 
@@ -52,6 +54,11 @@ If you dont use `uv` I highly recommend it as a replacement for `pip`. Rust base
 
 To run the files, be in the root directory of the repo and pass the respective file names to the `python` or `python3` command, e.g.
 `python3 autoencoder.py`
+
+I have trained and saved my models used in `autoencoder.py` to the `./model` directory so that they can be loaded and tested, however, all code used to train is included. If this is not sufficient, you can train the models yourself by uncommenting my calls to the training functions. Note that the loss thresholds are not guarenteed to be reached on every run within 300 epochs. Around epoch 290, or sometimes before, loss spikes and decreases much slower. This is due to adjustments in the optimization algorithm after certain conditions are met. I was able to train both models within 10 minutes before optimizing my code.
+
+If you plan on training models to test rather than loading my pre-trained ones, I recommend lowing the learning rate to 0.001 or lower and following the instructions in the comment of NetFlowDataSet, and adjust the calls to the training functions to use the train_dataset instead of the train_dataloader. With this, uncommenting line 383 and commenting line 384 will use the GPU if available.
+
 
 # The Outlook
 The outlook for this assignment was to create a model that had similar performances to the ones tested in the provided paper.
@@ -83,6 +90,11 @@ The differences in execution time are likely just differences in hardware. I am 
 implemented in `autoencoder.py`
 
 The paper didn't go into much detail with the method used to select the 4 best features for each attack type, so I wanted to find this on my own. The type of model generally used for this is called an AutoEncoder. Each forward step works in two passes, one to an encoder, and another to a decoder which is a mirror of the encoder's structure. The encoder usually takes some number of inputs, and gradually decreases this in subsequent layers to a bottleneck, which is then passed to the decoder. When training this model, then, the loss repressents the ability of the model to reconstruct the initial inputs after being compressed to the bottleneck, meaning the encoder is trained to make it's bottleneck layer some combined representation of the inputs, and is, in a sense, a form of feature extraction. From this, we can then determine the importance of each feature by checking how much impact it has on the loss after training.
+
+When training, I used a rather large but arbitrary batch size of 2560 and a learning rate of 0.01.
+The training loss per epoch seems to somewhat rely on the speed it takes to train the model. For example, not using a PyTorch dataloader to shuffle and batch my data, results in 0.4 - 0.5s per epoch and an acceptable trend of a reduction in loss as it trains, but, implementing my own shuffling and batching as in the Dataset itself results in about 0.1s per epoch. My own shuffling and batching makes the loss generally stay the same unless I decrease the learning rate to 0.001 or less.
+
+For the activation function of each layer I used ELU. I was made aware of it due to the autoencoder reference code I was using and considered changing it, however, ELU allows for/generates negative values as well as positive ones which may be useful when extracting features as some input features may be reduntant or have counter intuative effects on the ability to reconstruct the input data versus ReLU which would treat these values as 0. Essentially, I think ELU allows the autoencoder to be more expressive and therefore accurate, but, I didn't try using other activation functions for the autoencoder so.
 
 With this method, my model seems to have determined the following 8 features to be the most important, in order from most to least important:
 1. Flow Bytes/s
