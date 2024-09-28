@@ -343,7 +343,7 @@ def train_classifier(autoencoder: Autoencoder, classifier: Classifier, batch_siz
         classifier.eval()
         accuracy = 0
         with torch.no_grad():
-            accuracy = classification_report(ys_test.numpy(), np.array([is_ddos(x) for x in classifier(autoencoder.encoder(Xs_test)).numpy()]), output_dict=True)['accuracy'] * 100
+            accuracy = classification_report(ys_test.cpu().numpy(), np.array([is_ddos(x) for x in classifier(autoencoder.encoder(Xs_test)).cpu().numpy()]), output_dict=True)['accuracy'] * 100
         epoch += 1
         end = perf_counter()
         classifier.train()
