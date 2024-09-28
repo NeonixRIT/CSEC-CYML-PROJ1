@@ -355,7 +355,7 @@ def train_classifier(autoencoder: Autoencoder, classifier: Classifier, batch_siz
         end = perf_counter()
         classifier.train()
         print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Accuracy: {accuracy:.2f}%, Time: {end - start:.2f}s')
-    classifier.save(f'classifier_{epoch}.pth')
+    # classifier.save(f'classifier_{epoch}.pth')
 
 
 def test_classifier(autoencoder: Autoencoder, classifier: Classifier, dataset: Dataset):
