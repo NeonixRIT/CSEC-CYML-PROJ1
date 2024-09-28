@@ -294,7 +294,7 @@ class Classifier(nn.Module):
         self.to(device)
         self.device = device
         self.loss_fn = nn.BCELoss().to(self.device)
-        self.optimizer = optim.Adam(self.parameters(), lr=0.01)
+        self.optimizer = optim.Adam(self.parameters(), lr=0.001)
 
     def forward(self, x):
         return self.layers(x)
@@ -378,12 +378,12 @@ def test_classifier(autoencoder: Autoencoder, classifier: Classifier, dataset: D
 def main():
     # Get device
     # CPU is faster for me than MPS, so I'm using CPU, uncomment the line below to use GPU and comment the line below it
-    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-    # device = torch.device('cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+    device = torch.device('cpu')
     print(f'Using Device: {device}')
 
     # Load the data
-    print('Loading data...', end='')
+    print('Loading data...', end='', flush=True)
     csv_file_path = 'data/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv'
     full_dataset = NetFlowDataSet(csv_file_path, device=device)
     Xs_train, Xs_test, ys_train, ys_test = train_test_split(full_dataset.Xs, full_dataset.ys, test_size=0.4, shuffle=True)

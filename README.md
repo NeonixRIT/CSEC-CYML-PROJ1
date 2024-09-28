@@ -71,6 +71,9 @@ I will note, I cannot seem to replicate the training and testing that resulted i
 
 With this, follow the instructions in the main functions to use the GPU instead of the CPU.
 
+Note: in `autoencoder.py` I increased the loss threshold to make a successful training more likely.
+Also Note: it seems the initialized state of `Classifier` greatly impacts whether it trains or not. If accuracy is not decreasing, re-run. In my testing, this fixed it.
+
 # The Outlook
 The outlook for this assignment was to create a model that had similar performances to the ones tested in the provided paper.
 We were to choose a day of network data to train our model on and then use their 4 features as input for our model and get similar performance to their. The paper highly recommended a model using the Random Forest (RF) model as it was easily the fastest to train with an accuracy tied for first. However, it was noted a Random Forest implementation was not sufficient for this assignment and we were to use Neural Networks.
