@@ -112,7 +112,7 @@ class Autoencoder(nn.Module):
         self.to(self.device)
 
 
-def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch.Tensor, ys_train: torch.Tensor, desired_loss=0.000014):
+def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch.Tensor, ys_train: torch.Tensor, desired_loss=0.000019):
     autoencoder.train()
     autoencoder.to(autoencoder.device)
 
