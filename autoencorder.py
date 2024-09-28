@@ -385,8 +385,8 @@ def test_classifier(autoencoder: Autoencoder, classifier: Classifier, dataset: D
 def main():
     # Get device
     # CPU is faster for me than MPS, so I'm using CPU, uncomment the line below to use GPU and comment the line below it
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+    # device = torch.device('cpu')
     print(f'Using Device: {device}')
 
     # Load the data
