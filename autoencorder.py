@@ -6,6 +6,7 @@ https://b-nova.com/en/home/content/anomaly-detection-with-random-forest-and-pyto
 import csv
 import json
 import os
+import sys
 import warnings
 
 import matplotlib.pyplot as plt
@@ -116,34 +117,26 @@ def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch
     autoencoder.to(autoencoder.device)
 
     print('\nTraining the autoencoder...')
-    while True:
-        autoencoder.reset_parameters()
-        loss = torch.tensor(100, device=autoencoder.device)
-        epoch = 0
-        desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
-        previous_loss = torch.tensor([100], device=autoencoder.device)
-        gradiant_exploding = False
-        while loss.item() > desired_loss:
-            start = perf_counter()
-            for X, _ in batch_iterate(batch_size, Xs_train, ys_train, device=autoencoder.device):
-                autoencoder.optimizer.zero_grad()
-                preds: torch.Tensor = autoencoder(X)
-                loss: torch.Tensor = autoencoder.loss_fn(preds, X)
-                loss.backward()
-                autoencoder.optimizer.step()
-            end = perf_counter()
-            if (loss.item() != 100 and previous_loss.item() != 100) and (loss.item() / previous_loss.item() > 3):
-                print('Gradiant explosion detected, restarting training...')
-                print()
-                gradiant_exploding = True
-                break
-            previous_loss = loss
-            print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
-            epoch += 1
-        if gradiant_exploding:
-            continue
-        # autoencoder.save(f'autoencoder_{epoch}.pth')
-        return
+    epoch = 0
+    desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
+    loss = torch.tensor([100], device=autoencoder.device)
+    previous_loss = torch.tensor([100], device=autoencoder.device)
+    while loss.item() > desired_loss:
+        start = perf_counter()
+        for X, _ in batch_iterate(batch_size, Xs_train, ys_train, device=autoencoder.device):
+            autoencoder.optimizer.zero_grad()
+            preds: torch.Tensor = autoencoder(X)
+            loss: torch.Tensor = autoencoder.loss_fn(preds, X)
+            loss.backward()
+            autoencoder.optimizer.step()
+        end = perf_counter()
+        if (loss.item() != 100 and previous_loss.item() != 100) and (loss.item() / previous_loss.item() > 3):
+            print('Gradiant explosion detected restarting training...')
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        previous_loss = loss
+        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
+        epoch += 1
+    # autoencoder.save(f'autoencoder_{epoch}.pth')
 
 
 def calculate_reconstruction_loss(data: torch.Tensor, model: nn.Module):
