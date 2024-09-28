@@ -132,7 +132,7 @@ def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch
                 loss.backward()
                 autoencoder.optimizer.step()
             end = perf_counter()
-            if previous_loss.item() < 0.001 and loss.item() > 0.1:
+            if previous_loss.item() < 0.0001 and loss.item() > 0.009:
                 print('Gradiant explosion detected, restarting training...')
                 print()
                 gradiant_exploding = True
