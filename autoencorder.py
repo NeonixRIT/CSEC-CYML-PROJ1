@@ -118,10 +118,10 @@ def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch
     print('\nTraining the autoencoder...')
     while True:
         autoencoder.reset_parameters()
-        loss = torch.tensor(1.0, device=autoencoder.device)
+        loss = torch.tensor(100, device=autoencoder.device)
         epoch = 0
         desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
-        previous_loss = torch.tensor([desired_loss], device=autoencoder.device)
+        previous_loss = torch.tensor([100], device=autoencoder.device)
         gradiant_exploding = False
         while loss.item() > desired_loss:
             start = perf_counter()
@@ -132,7 +132,7 @@ def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch
                 loss.backward()
                 autoencoder.optimizer.step()
             end = perf_counter()
-            if loss.item() / previous_loss.item() > 3:
+            if (loss.item() != 100 and previous_loss.item() != 100) and (loss.item() / previous_loss.item() > 3):
                 print('Gradiant explosion detected, restarting training...')
                 print()
                 gradiant_exploding = True
