@@ -3,15 +3,18 @@ Using reference code found here:
 https://b-nova.com/en/home/content/anomaly-detection-with-random-forest-and-pytorch/
 """
 
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+import csv
+
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
-from torch.utils.data import Dataset, DataLoader, random_split
+
 from time import perf_counter
 
-import csv
+from torch.utils.data import Dataset, DataLoader, random_split
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
 
 
 class NetFlowDataSet(Dataset):

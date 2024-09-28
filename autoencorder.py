@@ -16,19 +16,27 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from itertools import batched
+# from itertools import batched
 from pprint import pprint
 from time import perf_counter
 
 from torch.nn.functional import mse_loss
 from torch.utils.data import Dataset, DataLoader, random_split
 
-from sklearn.preprocessing import Normalizer, MinMaxScaler
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import Normalizer, MinMaxScaler
 
 
 # Prevent warnings from being printed
 warnings.filterwarnings('ignore')
+
+
+def batch_iterate(batch_size, X: torch.Tensor, y: torch.Tensor, device):
+    perm = torch.from_numpy(np.random.permutation(y.size(0))).to(device)
+    for s in range(0, y.size(0), batch_size):
+        ids = perm[s:s + batch_size]
+        yield X[ids], y[ids]
 
 
 class NetFlowDataSet(Dataset):
@@ -39,12 +47,6 @@ class NetFlowDataSet(Dataset):
     Normalizes and scales the data
 
     Excludes data like IP addresses, ports, and timestamps to help with generalization
-
-    To build in batching and shuffling rather than using a Dataloader
-    uncomment lines:
-    67-75, 79, 82-87
-    and comment lines:
-    64-65, 78, 396
     """
 
     def __init__(self, csv_file, device):
@@ -61,30 +63,14 @@ class NetFlowDataSet(Dataset):
             scaler = MinMaxScaler()
             self.Xs = scaler.fit_transform(self.Xs)
 
-            self.Xs = torch.tensor(self.Xs, dtype=torch.float32, device=device)
-            self.ys = torch.tensor(self.ys, dtype=torch.float32, device=device)
+            self.Xs = torch.from_numpy(self.Xs).to(device)
+            self.ys = torch.from_numpy(self.ys).to(device)
 
-            # self.Xss = list(batched(self.Xs, 2560))
-            # self.yss = list(batched(self.ys, 2560))
-            # self.Xs = torch.tensor(self.Xss[:-1], dtype=torch.float32, device=device)
-            # self.ys = torch.tensor(self.yss[:-1], dtype=torch.float32, device=device)
-            # self.Xss = torch.tensor(self.Xss[:][-1], dtype=torch.float32, device=device)
-            # self.yss = torch.tensor(self.yss[:][-1], dtype=torch.float32, device=device)
-
-            # self.default_idxs = set(range(len(self)))
-            # self.idxs = set(self.default_idxs)
 
     def __len__(self):
         return len(self.Xs)
-        # return len(self.Xs) + 1
 
     def __getitem__(self, idx):
-        # if len(self.idxs) == 0:
-        #     self.idxs = set(self.default_idxs)
-        # idx = np.random.choice(list(self.idxs))
-        # self.idxs.remove(idx)
-        # if idx == len(self.Xs):
-        #     return self.Xss, self.yss
         return self.Xs[idx], self.ys[idx]
 
 
@@ -92,14 +78,24 @@ class NetFlowDataSet(Dataset):
 class Autoencoder(nn.Module):
     def __init__(self, device):
         super(Autoencoder, self).__init__()
-        self.encoder = nn.Sequential(nn.Linear(77, 64), nn.ELU(True), nn.Linear(64, 32), nn.ELU(True), nn.Linear(32, 24), nn.ELU(True), nn.Linear(24, 16), nn.ELU(True), nn.Linear(16, 8), nn.ELU(True))
+        self.encoder = nn.Sequential(nn.Linear(77, 64), nn.ELU(True), nn.Linear(64, 32), nn.ELU(True), nn.Linear(32, 24), nn.ELU(True), nn.Linear(24, 16), nn.ELU(True), nn.Linear(16, 8), nn.ELU(True), nn.LayerNorm(8))
         self.decoder = nn.Sequential(nn.Linear(8, 16), nn.ELU(True), nn.Linear(16, 24), nn.ELU(True), nn.Linear(24, 32), nn.ELU(True), nn.Linear(32, 64), nn.ELU(True), nn.Linear(64, 77), nn.ELU(True))
         self.device = device
+        self.loss_fn = nn.MSELoss().to(self.device)
+        self.optimizer = optim.Adam(self.parameters(), lr=0.01)
 
     def forward(self, x):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+
+    def reset_parameters(self):
+        for layer in self.encoder:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+        for layer in self.decoder:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
 
     def save(self, file_name='autoencoder.pth'):
         model_folder_path = './model'
@@ -112,30 +108,42 @@ class Autoencoder(nn.Module):
         model_folder_path = './model'
         file_name = os.path.join(model_folder_path, file_name)
         self.load_state_dict(torch.load(file_name))
+        self.to(self.device)
 
 
-def train_autoencoder(autoencoder: Autoencoder, train_dataset: DataLoader, desired_loss=0.000014):
+def train_autoencoder(autoencoder: Autoencoder, batch_size: int, Xs_train: torch.Tensor, ys_train: torch.Tensor, desired_loss=0.000014):
     autoencoder.train()
     autoencoder.to(autoencoder.device)
 
     print('\nTraining the autoencoder...')
-    criterion = nn.MSELoss().to(autoencoder.device)
-    optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
-    loss = torch.tensor(1.0, device=autoencoder.device)
-    epoch = 0
-    desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
-    while loss.item() > desired_loss:
-        start = perf_counter()
-        for X, _ in train_dataset:
-            optimizer.zero_grad()
-            preds: torch.Tensor = autoencoder(X)
-            loss: torch.Tensor = criterion(preds, X)
-            loss.backward()
-            optimizer.step()
-        end = perf_counter()
-        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
-        epoch += 1
-    autoencoder.save(f'autoencoder_{epoch}.pth')
+    while True:
+        autoencoder.reset_parameters()
+        loss = torch.tensor(1.0, device=autoencoder.device)
+        epoch = 0
+        desired_loss = torch.tensor([desired_loss], device=autoencoder.device).item()
+        previous_loss = torch.tensor([desired_loss], device=autoencoder.device)
+        gradiant_exploding = False
+        while loss.item() > desired_loss:
+            start = perf_counter()
+            for X, _ in batch_iterate(batch_size, Xs_train, ys_train, device=autoencoder.device):
+                autoencoder.optimizer.zero_grad()
+                preds: torch.Tensor = autoencoder(X)
+                loss: torch.Tensor = autoencoder.loss_fn(preds, X)
+                loss.backward()
+                autoencoder.optimizer.step()
+            end = perf_counter()
+            if previous_loss.item() < 0.001 and loss.item() > 0.1:
+                print('Gradiant explosion detected, restarting training...')
+                print()
+                gradiant_exploding = True
+                break
+            previous_loss = loss
+            print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
+            epoch += 1
+        if gradiant_exploding:
+            continue
+        # autoencoder.save(f'autoencoder_{epoch}.pth')
+        return
 
 
 def calculate_reconstruction_loss(data: torch.Tensor, model: nn.Module):
@@ -160,90 +168,83 @@ def find_important_features(autoencoder: Autoencoder, full_dataset: NetFlowDataS
     Find the most important features according to the autoencoder using perturbation
 
     According the this model, the 8 most important features seem to be:
-    1.  Flow Bytes/s (0.003927684882000904)
-    2.  Idle Max (0.00286572429286025)
-    3.  Idle Mean (0.0027598217402555747)
-    4.  Flow IAT Max (0.0026498937786527677)
-    5.  Fwd IAT Max (0.002398798269496183)
-    6:  Idle Min (0.00208358678901277)
-    7:  Flow Duration (0.001603344715476851)
-    8:  Fwd IAT Total (0.0014476983615168137)
-    9:  Packet Length Variance (0.001090961768568377)
-    10: Bwd IAT Max (0.0008813637814455433)
-    11: Fwd IAT Std (0.0008760383625485701)
-    12: Bwd IAT Total (0.0007779802235745592)
-    13: Flow IAT Std (0.0007390469818346901)
-    14: Flow IAT Mean (0.0005638601414830191)
-    15: Flow Packets/s (0.0004904000361420913)
-    16: Bwd IAT Std (0.0003571593242668314)
-    17: Fwd IAT Mean (0.00035411398675933015)
-    18: Idle Std (0.00033513264315843116)
-    19: Flow IAT Min (0.0002816759206325514)
-    20: Bwd IAT Mean (0.00010983653010043781)
-    21: Fwd IAT Min (6.229329846973997e-05)
-    22: Fwd Packets/s (5.496199264598545e-05)
-    23: Bwd IAT Min (3.085926982748788e-05)
-    24: Bwd Packet Length Std (2.7228821636526845e-05)
-    25: Bwd Packets/s (1.652043101785239e-05)
-    26: Bwd Packet Length Max (1.5434392480528913e-05)
-    27: Init_Win_bytes_forward (1.3028373359702528e-05)
-    28: Active Max (9.772153134690598e-06)
-    29: Active Mean (7.83136420068331e-06)
-    30: Active Min (7.594657290610485e-06)
-    31: Bwd Packet Length Min (7.3010287451324984e-06)
-    32: Bwd Packet Length Mean (6.932135875103995e-06)
-    33: Avg Bwd Segment Size (6.891992597957142e-06)
-    34: Init_Win_bytes_backward (4.881356289843097e-06)
-    35: PSH Flag Count (4.112052920390852e-06)
-    36: ACK Flag Count (9.614905138732865e-07)
-    37: Down/Up Ratio (7.995404303073883e-07)
-    38: Subflow Bwd Bytes (7.892813300713897e-07)
-    39: Total Length of Bwd Packets (7.873622962506488e-07)
-    40: Max Packet Length (6.242389645194635e-07)
-    41: Min Packet Length (5.057172529632226e-07)
-    42: Packet Length Std (4.336634447099641e-07)
-    43: min_seg_size_forward (4.2869214667007327e-07)
-    44: Packet Length Mean (4.087924025952816e-07)
-    45: Average Packet Size (3.898003342328593e-07)
-    46: Fwd Header Length (3.4619915822986513e-07)
-    47: Fwd Header Length (3.45518856192939e-07)
-    48: FIN Flag Count (3.4434378903824836e-07)
-    49: Total Fwd Packets (3.189106791978702e-07)
-    50: Subflow Fwd Packets (3.143450157949701e-07)
-    51: Total Length of Fwd Packets (3.061068127863109e-07)
-    52: Subflow Fwd Bytes (3.0290357244666666e-07)
-    53: Total Backward Packets (3.0157025321386755e-07)
-    54: Subflow Bwd Packets (3.001605364261195e-07)
-    55: Fwd Packet Length Mean (2.9740112950094044e-07)
-    56: Avg Fwd Segment Size (2.9278089641593397e-07)
-    57: Fwd Packet Length Min (2.898941602325067e-07)
-    58: act_data_pkt_fwd (2.8799331630580127e-07)
-    59: Fwd Packet Length Max (2.8624708647839725e-07)
-    60: Active Std (2.53492544288747e-07)
-    61: Bwd Header Length (2.0309016690589488e-07)
-    62: RST Flag Count (1.527660060673952e-07)
-    63: ECE Flag Count (1.5175282896962017e-07)
-    64: SYN Flag Count (8.311872079502791e-08)
-    65: Fwd PSH Flags (8.177630661521107e-08)
-    66: Bwd PSH Flags (-1.8189894035458565e-12)
-    67: Fwd URG Flags (-1.8189894035458565e-12)
-    68: Bwd URG Flags (-1.8189894035458565e-12)
-    69: CWE Flag Count (-1.8189894035458565e-12)
-    70: Fwd Avg Bytes/Bulk (-1.8189894035458565e-12)
-    71: Fwd Avg Packets/Bulk (-1.8189894035458565e-12)
-    72: Fwd Avg Bulk Rate (-1.8189894035458565e-12)
-    73: Bwd Avg Bytes/Bulk (-1.8189894035458565e-12)
-    74: Bwd Avg Packets/Bulk (-1.8189894035458565e-12)
-    75: Bwd Avg Bulk Rate (-1.8189894035458565e-12)
-    76: URG Flag Count (-2.7996065909974277e-08)
-    77: Fwd Packet Length Std (-4.727553459815681e-08)
-
-    This labels the top 4 as Flow Bytes/s, Idle Max, Idle Mean, and Flow IAT Max
-    instead of the paper's top 4 of Flow Duration, Flow IAT Std, Backward Packet Length Std,
-    and Average Package Size.
-
-    The paper's top 4 are labeled the 7th, 13th, 24th, and 45th most important features respectively.
-
+    1:   Flow Bytes/s (0.00339001234715397)
+    2:   Idle Max (0.002881238275222131)
+    3:   Flow IAT Max (0.0028654686557274545)
+    4:   Idle Mean (0.0028314162427705014)
+    5:   Fwd IAT Max (0.0026891995603364194)
+    6:   Fwd IAT Total (0.0024685119660716737)
+    7:   Flow Duration (0.0022174993446242297)
+    8:   Idle Min (0.0019206720553484047)
+    9:   Packet Length Variance (0.001180395172923454)
+    10:  Bwd IAT Max (0.000999427555143484)
+    11:  Fwd IAT Std (0.0009712725095596397)
+    12:  Flow IAT Std (0.0008513370212313021)
+    13:  Bwd IAT Total (0.0007719564400758827)
+    14:  Flow IAT Mean (0.0006468119481723988)
+    15:  Flow Packets/s (0.0005138178039487684)
+    16:  Fwd IAT Mean (0.00040708279448153917)
+    17:  Bwd IAT Std (0.0003659140584204579)
+    18:  Flow IAT Min (0.00034386048537271563)
+    19:  Idle Std (0.00029638541491294745)
+    20:  Bwd IAT Mean (0.00012512591820268426)
+    21:  Fwd IAT Min (7.250333328556735e-05)
+    22:  Fwd Packets/s (4.64789573015878e-05)
+    23:  Bwd Packet Length Std (3.160765299980994e-05)
+    24:  Bwd IAT Min (2.4045015379670076e-05)
+    25:  Bwd Packet Length Max (1.668739969318267e-05)
+    26:  Init_Win_bytes_forward (1.4613904568250291e-05)
+    27:  Bwd Packets/s (1.419953150616493e-05)
+    28:  Bwd Packet Length Min (1.0935187674476765e-05)
+    29:  Active Max (9.469118595006876e-06)
+    30:  Active Mean (7.987788194441237e-06)
+    31:  Active Min (7.674498192500323e-06)
+    32:  Bwd Packet Length Mean (6.861964720883407e-06)
+    33:  Avg Bwd Segment Size (6.8382541940081865e-06)
+    34:  PSH Flag Count (5.146632247488014e-06)
+    35:  Init_Win_bytes_backward (4.318275387049653e-06)
+    36:  Max Packet Length (9.122686606133357e-07)
+    37:  Packet Length Std (7.146627467591316e-07)
+    38:  Subflow Bwd Bytes (6.848731572972611e-07)
+    39:  Total Length of Bwd Packets (6.725949788233265e-07)
+    40:  Average Packet Size (5.329566192813218e-07)
+    41:  Packet Length Mean (5.271667760098353e-07)
+    42:  Total Length of Fwd Packets (4.918038030155003e-07)
+    43:  Fwd PSH Flags (4.901921784039587e-07)
+    44:  Subflow Fwd Bytes (4.891280696028844e-07)
+    45:  SYN Flag Count (4.7578032535966486e-07)
+    46:  Down/Up Ratio (4.39451468992047e-07)
+    47:  ACK Flag Count (4.314897523727268e-07)
+    48:  Fwd Packet Length Mean (4.2510873754508793e-07)
+    49:  Avg Fwd Segment Size (4.2220563045702875e-07)
+    50:  Min Packet Length (3.596796886995435e-07)
+    51:  Fwd Packet Length Max (3.5495031625032425e-07)
+    52:  Fwd Header Length (3.4491131373215467e-07)
+    53:  Fwd Header Length (3.4037657314911485e-07)
+    54:  min_seg_size_forward (3.3094329410232604e-07)
+    55:  Fwd Packet Length Min (3.2698881113901734e-07)
+    56:  Total Fwd Packets (2.883007255150005e-07)
+    57:  Subflow Fwd Packets (2.869510353775695e-07)
+    58:  Total Backward Packets (2.7831811166834086e-07)
+    59:  Subflow Bwd Packets (2.747856342466548e-07)
+    60:  act_data_pkt_fwd (2.617816790007055e-07)
+    61:  Active Std (2.3100255930330604e-07)
+    62:  FIN Flag Count (1.9139952200930566e-07)
+    63:  Fwd Packet Length Std (1.8021819414570928e-07)
+    64:  Bwd Header Length (1.303615135839209e-07)
+    65:  Bwd PSH Flags (-1.8189894035458565e-12)
+    66:  Fwd URG Flags (-1.8189894035458565e-12)
+    67:  Bwd URG Flags (-1.8189894035458565e-12)
+    68:  CWE Flag Count (-1.8189894035458565e-12)
+    69:  Fwd Avg Bytes/Bulk (-1.8189894035458565e-12)
+    70:  Fwd Avg Packets/Bulk (-1.8189894035458565e-12)
+    71:  Fwd Avg Bulk Rate (-1.8189894035458565e-12)
+    72:  Bwd Avg Bytes/Bulk (-1.8189894035458565e-12)
+    73:  Bwd Avg Packets/Bulk (-1.8189894035458565e-12)
+    74:  Bwd Avg Bulk Rate (-1.8189894035458565e-12)
+    75:  URG Flag Count (-2.3557731765322387e-08)
+    76:  RST Flag Count (-3.5743232729146257e-07)
+    77:  ECE Flag Count (-3.5899211070500314e-07)
     """
     # Find which features are the most important using Perturbation
     print('\nCalculating feature importance using perturbation...')
@@ -266,7 +267,7 @@ def find_important_features(autoencoder: Autoencoder, full_dataset: NetFlowDataS
         perturbed_losses = []
         for X, _ in full_dataset:
             if X.dim() == 1:
-                X = torch.tensor(np.array([X]))
+                X = torch.from_numpy(np.array([X]))
             perturbed_data = perturb_feature(X, feature_idx, perturbation_type='zero')
             perturbed_losses.append(calculate_reconstruction_loss(perturbed_data, autoencoder))
 
@@ -299,6 +300,8 @@ class Classifier(nn.Module):
         self.layers = nn.Sequential(nn.Linear(8, 6), nn.ReLU(), nn.Linear(6, 5), nn.ReLU(), nn.Linear(5, 4), nn.ReLU(), nn.Linear(4, 2), nn.ReLU(), nn.Linear(2, 1), nn.Sigmoid())
         self.to(device)
         self.device = device
+        self.loss_fn = nn.BCELoss().to(self.device)
+        self.optimizer = optim.Adam(self.parameters(), lr=0.01)
 
     def forward(self, x):
         return self.layers(x)
@@ -314,33 +317,7 @@ class Classifier(nn.Module):
         model_folder_path = './model'
         file_name = os.path.join(model_folder_path, file_name)
         self.load_state_dict(torch.load(file_name))
-
-
-def train_classifier(autoencoder: Autoencoder, classifier: Classifier, train_dataloader: DataLoader, desired_loss=0.0045):
-    classifier.train()
-
-    # Warm up the device
-    for _ in range(100):
-        torch.matmul(torch.rand(500, 500).to(autoencoder.device), torch.rand(500, 500).to(autoencoder.device))
-
-    print('\nTraining the classifier...')
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(classifier.parameters(), lr=0.01)
-    loss = torch.tensor(1.0)
-    epoch = 0
-    while loss.item() > desired_loss:
-        start = perf_counter()
-        for _, (X, y) in enumerate(train_dataloader):
-            optimizer.zero_grad()
-            features = autoencoder.encoder(X)
-            preds: torch.Tensor = classifier(features)
-            loss: torch.Tensor = criterion(preds, y)
-            loss.backward()
-            optimizer.step()
-        end = perf_counter()
-        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Time: {end - start:.2f}s')
-        epoch += 1
-    classifier.save(f'classifier_{epoch}.pth')
+        self.to(self.device)
 
 
 def is_ddos(pred: torch.Tensor, threshold: float = 0.5):
@@ -351,6 +328,34 @@ def is_ddos(pred: torch.Tensor, threshold: float = 0.5):
     threshold = 0.5 is equivalent to rounding the prediction to the nearest integer
     """
     return int(pred.item() >= threshold)
+
+
+def train_classifier(autoencoder: Autoencoder, classifier: Classifier, batch_size: int, Xs_train: torch.Tensor, ys_train: torch.Tensor, Xs_test: torch.Tensor, ys_test: torch.Tensor, desired_accuracy=99.7):
+    autoencoder.eval()
+    classifier.train()
+    classifier.to(autoencoder.device)
+
+    print('\nTraining the classifier...')
+    epoch = 0
+    accuracy = 0
+    while accuracy < desired_accuracy:
+        start = perf_counter()
+        for X, y in batch_iterate(batch_size, Xs_train, ys_train, device=autoencoder.device):
+            classifier.optimizer.zero_grad()
+            features = autoencoder.encoder(X)
+            preds: torch.Tensor = classifier(features)
+            loss: torch.Tensor = classifier.loss_fn(preds, y)
+            loss.backward()
+            classifier.optimizer.step()
+        classifier.eval()
+        accuracy = 0
+        with torch.no_grad():
+            accuracy = classification_report(ys_test.numpy(), np.array([is_ddos(x) for x in classifier(autoencoder.encoder(Xs_test)).numpy()]), output_dict=True)['accuracy'] * 100
+        epoch += 1
+        end = perf_counter()
+        classifier.train()
+        print(f'Epoch [{epoch+1}/???], Loss: {loss.item():.7f}, Accuracy: {accuracy:.2f}%, Time: {end - start:.2f}s')
+    classifier.save(f'classifier_{epoch}.pth')
 
 
 def test_classifier(autoencoder: Autoencoder, classifier: Classifier, dataset: Dataset):
@@ -384,17 +389,12 @@ def main():
     device = torch.device('cpu')
     print(f'Using Device: {device}')
 
-
     # Load the data
     print('Loading data...', end='')
     csv_file_path = 'data/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv'
     full_dataset = NetFlowDataSet(csv_file_path, device=device)
-    train_dataset, test_dataset = random_split(full_dataset, [0.6, 0.4])
-
+    Xs_train, Xs_test, ys_train, ys_test = train_test_split(full_dataset.Xs, full_dataset.ys, test_size=0.4, shuffle=True)
     batch_size = 2560
-    shuffle = False
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
     print('done.')
 
     # Initialize the models
@@ -402,14 +402,14 @@ def main():
     classifier = Classifier(device)
 
     # Train the autoencoder
-    # train_autoencoder(autoencoder, train_dataloader)
+    train_autoencoder(autoencoder, batch_size, Xs_train, ys_train)
 
     # Train the classifier
-    # train_classifier(autoencoder, classifier, train_dataloader)
+    train_classifier(autoencoder, classifier, batch_size, Xs_train, ys_train, Xs_test, ys_test)
 
     # Test the models
-    autoencoder.load('autoencoder_272.pth')
-    classifier.load('classifier_254.pth')
+    # autoencoder.load('autoencoder_405.pth')
+    # classifier.load('classifier_1323.pth')
     test_classifier(autoencoder, classifier, full_dataset)
 
     # Find the most important features
